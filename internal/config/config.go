@@ -61,9 +61,14 @@ type GlobalConfig struct {
 	// separate durable fixer session across fix turns). Default true; set
 	// session_reuse: false to force every invocation cold.
 	SessionReuse bool `yaml:"-"`
-	AutoFix      AutoFixRaw
-	Intent       IntentRaw
-	Test         TestRaw
+	// Attribution controls whether the gate identifies itself in generated
+	// commit messages and PR bodies (the "no-mistakes(step): ..." commit
+	// prefix and the PR's "## Pipeline" section). Default true; set
+	// attribution: false to omit both.
+	Attribution bool `yaml:"-"`
+	AutoFix     AutoFixRaw
+	Intent      IntentRaw
+	Test        TestRaw
 }
 
 // globalConfigRaw is the on-disk YAML representation with duration as string.
@@ -79,6 +84,7 @@ type globalConfigRaw struct {
 	StepQuietWarning     string              `yaml:"step_quiet_warning"`
 	LogLevel             string              `yaml:"log_level"`
 	SessionReuse         *bool               `yaml:"session_reuse"`
+	Attribution          *bool               `yaml:"attribution"`
 	AutoFix              AutoFixRaw          `yaml:"auto_fix"`
 	Intent               IntentRaw           `yaml:"intent"`
 	Test                 TestRaw             `yaml:"test"`
@@ -185,6 +191,7 @@ type Config struct {
 	StepQuietWarning     time.Duration
 	LogLevel             string
 	SessionReuse         bool
+	Attribution          bool
 	Commands             Commands
 	IgnorePatterns       []string
 	AutoFix              AutoFix
@@ -330,6 +337,11 @@ daemon_connect_timeout: "3s"
 # Supported for claude and codex; other agents run cold. Set false to force
 # every agent invocation cold.
 session_reuse: true
+
+# Whether the gate identifies itself in generated commit messages (the
+# "no-mistakes(step): ..." prefix) and PR bodies (the "## Pipeline" section).
+# Set false to omit both and generate plain, unbranded commits and PRs.
+attribution: true
 
 # Log level for daemon output
 # Options: debug, info, warn, error
@@ -744,6 +756,7 @@ func DefaultGlobalConfig() *GlobalConfig {
 		DaemonConnectTimeout: DefaultDaemonConnectTimeout,
 		LogLevel:             "info",
 		SessionReuse:         true,
+		Attribution:          true,
 	}
 }
 
@@ -817,6 +830,9 @@ func LoadGlobal(path string) (*GlobalConfig, error) {
 	}
 	if raw.SessionReuse != nil {
 		cfg.SessionReuse = *raw.SessionReuse
+	}
+	if raw.Attribution != nil {
+		cfg.Attribution = *raw.Attribution
 	}
 	if raw.AutoFix.CI == nil {
 		raw.AutoFix.CI = raw.AutoFix.Babysit
@@ -1096,6 +1112,7 @@ func Merge(global *GlobalConfig, repo *RepoConfig) *Config {
 		StepQuietWarning:     global.StepQuietWarning,
 		LogLevel:             global.LogLevel,
 		SessionReuse:         global.SessionReuse,
+		Attribution:          global.Attribution,
 		Commands:             repo.Commands,
 		IgnorePatterns:       repo.IgnorePatterns,
 		AutoFix:              af,

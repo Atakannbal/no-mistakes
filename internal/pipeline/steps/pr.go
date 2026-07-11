@@ -227,6 +227,12 @@ func (s *PRStep) buildPipelineSection(sctx *pipeline.StepContext) (string, strin
 
 	pipelineMD, riskLine := BuildPipelineSummary(steps, rounds)
 	testingMD := BuildTestingSummaryForPR(steps, rounds, sctx.Repo.UpstreamURL, sctx.Run.HeadSHA, sctx.WorkDir)
+	if sctx.Config != nil && !sctx.Config.Attribution {
+		// Attribution disabled: omit the step-by-step gate narrative, keep
+		// the risk/testing sections since they carry useful review content
+		// without naming the tool that produced them.
+		pipelineMD = ""
+	}
 	return pipelineMD, riskLine, testingMD
 }
 

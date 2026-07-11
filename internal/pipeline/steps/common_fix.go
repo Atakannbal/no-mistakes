@@ -63,7 +63,8 @@ func commitAgentFixes(sctx *pipeline.StepContext, stepName types.StepName, summa
 	if summary == "" {
 		summary = fallbackSummary
 	}
-	commitMessage := deterministicFixCommitMessage(stepName, summary)
+	attribution := sctx.Config == nil || sctx.Config.Attribution
+	commitMessage := deterministicFixCommitMessage(attribution, stepName, summary)
 	if _, err := git.Run(ctx, sctx.WorkDir, "commit", "-m", commitMessage); err != nil {
 		return fmt.Errorf("commit %s changes: %w", stepName, err)
 	}
@@ -96,9 +97,21 @@ func extractCommitSummary(result *agent.Result) (string, error) {
 	return cleaned, nil
 }
 
-func deterministicFixCommitMessage(stepName types.StepName, summary string) string {
+// fixCommitMessage prefixes plainMessage with "no-mistakes: " unless the
+// effective config has attribution disabled.
+func fixCommitMessage(sctx *pipeline.StepContext, plainMessage string) string {
+	if sctx.Config != nil && !sctx.Config.Attribution {
+		return plainMessage
+	}
+	return "no-mistakes: " + plainMessage
+}
+
+func deterministicFixCommitMessage(attribution bool, stepName types.StepName, summary string) string {
 	if summary == "" {
 		summary = "apply fixes"
+	}
+	if !attribution {
+		return summary
 	}
 	return fmt.Sprintf("no-mistakes(%s): %s", stepName, summary)
 }

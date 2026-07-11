@@ -613,6 +613,24 @@ func TestCommitAgentFixes_UsesFallbackSummary(t *testing.T) {
 	}
 }
 
+func TestCommitAgentFixes_AttributionDisabled_OmitsNoMistakesPrefix(t *testing.T) {
+	t.Parallel()
+	dir, baseSHA, headSHA := setupGitRepo(t)
+	gitCmd(t, dir, "checkout", "--detach", headSHA)
+
+	ag := &mockAgent{name: "test"}
+	sctx := newTestContextWithDBRecords(t, ag, dir, baseSHA, headSHA, config.Commands{})
+	sctx.Config.Attribution = false
+
+	os.WriteFile(filepath.Join(dir, "agent-change.txt"), []byte("change"), 0o644)
+	if err := commitAgentFixes(sctx, types.StepLint, "", "fallback lint fix"); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastCommitMessage(t, dir); got != "fallback lint fix" {
+		t.Errorf("commit message = %q, want unbranded fallback summary", got)
+	}
+}
+
 func TestMatchIgnorePattern(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

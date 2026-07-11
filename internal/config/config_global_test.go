@@ -35,6 +35,25 @@ func TestLoadGlobal_Defaults(t *testing.T) {
 	if len(cfg.AgentPathOverride) != 0 {
 		t.Errorf("agent_path_override = %v, want empty", cfg.AgentPathOverride)
 	}
+	if !cfg.Attribution {
+		t.Errorf("attribution = %v, want true", cfg.Attribution)
+	}
+}
+
+func TestLoadGlobal_AttributionFalse(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("attribution: false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadGlobal(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Attribution {
+		t.Errorf("attribution = %v, want false", cfg.Attribution)
+	}
 }
 
 func TestEnsureDefaultGlobalConfig_CreatesFile(t *testing.T) {
@@ -428,6 +447,9 @@ func TestDefaultConfigYAML_MatchesGoDefaults(t *testing.T) {
 	}
 	if raw.SessionReuse == nil || !*raw.SessionReuse {
 		t.Errorf("YAML session_reuse = %v, Go default = true", raw.SessionReuse)
+	}
+	if raw.Attribution == nil || !*raw.Attribution {
+		t.Errorf("YAML attribution = %v, Go default = true", raw.Attribution)
 	}
 	defaults := autoFixDefaults()
 	if raw.AutoFix.Lint == nil || *raw.AutoFix.Lint != defaults.Lint {
