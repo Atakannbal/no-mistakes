@@ -712,6 +712,7 @@ func TestPRStep_CustomTemplate_RendersConfiguredLayout(t *testing.T) {
 	templatePath := filepath.Join(dir, "pr-template.md")
 	templateBody := "# {{.Title}} ({{.Branch}})\n\n" +
 		"Changes:\n{{.WhatChanged}}\n\n" +
+		"Jira: {{.JiraTicket}}\n\n" +
 		"Risk: {{.Risk}}\n\n" +
 		"Test evidence:\n{{.Testing}}\n"
 	if err := os.WriteFile(templatePath, []byte(templateBody), 0o644); err != nil {
@@ -731,6 +732,7 @@ func TestPRStep_CustomTemplate_RendersConfiguredLayout(t *testing.T) {
 	sctx := newTestContextWithDBRecords(t, ag, dir, baseSHA, headSHA, config.Commands{})
 	sctx.Env = env
 	sctx.Config.PR.Template = "pr-template.md"
+	sctx.Run.Branch = "refs/heads/feature/PROJ-123-improve-header"
 
 	reviewStep, err := sctx.DB.InsertStepResult(sctx.Run.ID, types.StepReview)
 	if err != nil {
@@ -771,8 +773,11 @@ func TestPRStep_CustomTemplate_RendersConfiguredLayout(t *testing.T) {
 	}
 	ghLog := string(logData)
 
-	if !strings.Contains(ghLog, "# fix: improve pipeline header UX (feature)") {
+	if !strings.Contains(ghLog, "# fix: improve pipeline header UX (feature/PROJ-123-improve-header)") {
 		t.Fatalf("expected custom template heading, got:\n%s", ghLog)
+	}
+	if !strings.Contains(ghLog, "Jira: PROJ-123") {
+		t.Fatalf("expected Jira ticket placeholder filled in from branch name, got:\n%s", ghLog)
 	}
 	if !strings.Contains(ghLog, "- keep branch status readable\n- fix footer truncation") {
 		t.Fatalf("expected What Changed content without its built-in heading, got:\n%s", ghLog)

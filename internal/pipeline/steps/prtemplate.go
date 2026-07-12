@@ -97,6 +97,7 @@ type prTemplateData struct {
 	Risk        string
 	Testing     string
 	Pipeline    string
+	JiraTicket  string
 }
 
 // loadPRTemplate reads and parses the repo's configured pr.template file, if
@@ -152,7 +153,7 @@ func stripWhatChangedHeading(body string) string {
 // present and valid, otherwise the built-in section layout.
 func finalizePRBody(sctx *pipeline.StepContext, title, branch, whatChanged, riskLine, testingMD, pipelineMD string, bodyLimit int) string {
 	if tmpl, ok := loadPRTemplate(sctx); ok {
-		rendered, err := renderPRBodyFromTemplate(tmpl, title, branch, whatChanged, cleanedUserIntent(sctx), riskLine, testingMD, pipelineMD, bodyLimit)
+		rendered, err := renderPRBodyFromTemplate(tmpl, title, branch, whatChanged, cleanedUserIntent(sctx), extractJiraTicket(sctx, branch), riskLine, testingMD, pipelineMD, bodyLimit)
 		if err != nil {
 			slog.Warn("pr.template failed to render, falling back to built-in PR body", "path", sctx.Config.PR.Template, "error", err)
 		} else {
@@ -170,7 +171,7 @@ func finalizePRBody(sctx *pipeline.StepContext, title, branch, whatChanged, risk
 // the same way the built-in layout does as a last-resort backstop. Unlike
 // the built-in layout it has no section-by-section budget trimming - a
 // custom template is expected to be shaped by its author to fit.
-func renderPRBodyFromTemplate(tmpl *template.Template, title, branch, whatChanged, intentText, riskLine, testingMD, pipelineMD string, bodyLimit int) (string, error) {
+func renderPRBodyFromTemplate(tmpl *template.Template, title, branch, whatChanged, intentText, jiraTicket, riskLine, testingMD, pipelineMD string, bodyLimit int) (string, error) {
 	data := prTemplateData{
 		Title:       title,
 		Branch:      branch,
@@ -179,6 +180,7 @@ func renderPRBodyFromTemplate(tmpl *template.Template, title, branch, whatChange
 		Risk:        riskLine,
 		Testing:     testingMD,
 		Pipeline:    pipelineMD,
+		JiraTicket:  jiraTicket,
 	}
 	var b strings.Builder
 	if err := tmpl.Execute(&b, data); err != nil {

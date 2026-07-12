@@ -163,6 +163,7 @@ The template is a [Go `text/template`](https://pkg.go.dev/text/template) file. A
 | `{{.Risk}}` | Risk assessment line |
 | `{{.Testing}}` | Testing section content |
 | `{{.Pipeline}}` | Pipeline step narrative (empty when `attribution: false`) |
+| `{{.JiraTicket}}` | Ticket ID extracted from the branch name (see `pr.jira_pattern`), empty if none found |
 
 A template that fails to read or parse falls back to the built-in layout, with a warning logged. This field only affects output formatting, not what commands or agent run, so unlike `commands.*`/`agent`/`document.instructions` it is read from the pushed branch, not gated behind the trusted default-branch copy.
 
