@@ -790,6 +790,100 @@ func TestPRStep_CustomTemplate_RendersConfiguredLayout(t *testing.T) {
 	}
 }
 
+// TestPRStep_AutoDetectsGitHubTemplate_RendersConfiguredLayout mirrors
+// TestPRStep_CustomTemplate_RendersConfiguredLayout but with no pr.template
+// configured: the repo-standard .github/pull_request_template.md should be
+// auto-detected and used the same way an explicitly configured template
+// would be.
+func TestPRStep_AutoDetectsGitHubTemplate_RendersConfiguredLayout(t *testing.T) {
+	t.Parallel()
+	dir, baseSHA, headSHA := setupGitRepo(t)
+
+	env, logFile := fakeGH(t, "")
+
+	githubDir := filepath.Join(dir, ".github")
+	if err := os.MkdirAll(githubDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	templateBody := "# {{.Title}} ({{.Branch}})\n\n" +
+		"Changes:\n{{.WhatChanged}}\n\n" +
+		"Jira: {{.JiraTicket}}\n\n" +
+		"Risk: {{.Risk}}\n\n" +
+		"Test evidence:\n{{.Testing}}\n"
+	if err := os.WriteFile(filepath.Join(githubDir, "pull_request_template.md"), []byte(templateBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reviewFindings := `{"findings":[],"summary":"clean","risk_level":"medium","risk_rationale":"touches critical error handling"}`
+	testRound1 := `{"findings":[{"id":"test-1","severity":"error","file":"pkg/handler_test.go","line":42,"description":"expected 429 got 200"}],"summary":"1 failure"}`
+
+	ag := &mockAgent{
+		name: "test",
+		runFn: func(ctx context.Context, opts agent.RunOpts) (*agent.Result, error) {
+			payload := json.RawMessage(`{"title":"fix: improve pipeline header UX","body":"## What Changed\n\n- keep branch status readable\n- fix footer truncation"}`)
+			return &agent.Result{Output: payload}, nil
+		},
+	}
+	sctx := newTestContextWithDBRecords(t, ag, dir, baseSHA, headSHA, config.Commands{})
+	sctx.Env = env
+	sctx.Run.Branch = "refs/heads/feature/PROJ-123-improve-header"
+
+	reviewStep, err := sctx.DB.InsertStepResult(sctx.Run.ID, types.StepReview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sctx.DB.UpdateStepStatus(reviewStep.ID, types.StepStatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := sctx.DB.SetStepFindings(reviewStep.ID, reviewFindings); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sctx.DB.InsertStepRound(reviewStep.ID, 1, "initial", &reviewFindings, nil, 500); err != nil {
+		t.Fatal(err)
+	}
+
+	testStep, err := sctx.DB.InsertStepResult(sctx.Run.ID, types.StepTest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sctx.DB.UpdateStepStatus(testStep.ID, types.StepStatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sctx.DB.InsertStepRound(testStep.ID, 1, "initial", &testRound1, nil, 800); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sctx.DB.InsertStepRound(testStep.ID, 2, "auto_fix", nil, nil, 600); err != nil {
+		t.Fatal(err)
+	}
+
+	step := &PRStep{}
+	if _, err := step.Execute(sctx); err != nil {
+		t.Fatal(err)
+	}
+
+	logData, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ghLog := string(logData)
+
+	if !strings.Contains(ghLog, "# fix: improve pipeline header UX (feature/PROJ-123-improve-header)") {
+		t.Fatalf("expected auto-detected template heading, got:\n%s", ghLog)
+	}
+	if !strings.Contains(ghLog, "Jira: PROJ-123") {
+		t.Fatalf("expected Jira ticket placeholder filled in from branch name, got:\n%s", ghLog)
+	}
+	if !strings.Contains(ghLog, "- keep branch status readable\n- fix footer truncation") {
+		t.Fatalf("expected What Changed content without its built-in heading, got:\n%s", ghLog)
+	}
+	if !strings.Contains(ghLog, "Risk: ⚠️ Medium: touches critical error handling") {
+		t.Fatalf("expected risk placeholder filled in, got:\n%s", ghLog)
+	}
+	if strings.Contains(ghLog, "## Pipeline") || strings.Contains(ghLog, "## Risk Assessment") {
+		t.Fatalf("expected built-in section headings to be absent under an auto-detected template, got:\n%s", ghLog)
+	}
+}
+
 func TestPRStep_CustomTitleTemplate_UsesJiraTicketFromBranch(t *testing.T) {
 	t.Parallel()
 	dir, baseSHA, headSHA := setupGitRepo(t)
