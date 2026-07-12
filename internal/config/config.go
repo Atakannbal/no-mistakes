@@ -230,7 +230,9 @@ type Config struct {
 // PR is the resolved PR-step formatting config.
 type PR struct {
 	// Template is a repo-relative path to a custom PR body template. Empty
-	// means use the built-in section layout.
+	// auto-detects .github/pull_request_template.md or
+	// .github/PULL_REQUEST_TEMPLATE.md, falling back to the built-in
+	// section layout if neither exists. See loadPRTemplate.
 	Template string
 	// TitleTemplate overrides the built-in conventional-commit title
 	// format. Empty means use the built-in format.

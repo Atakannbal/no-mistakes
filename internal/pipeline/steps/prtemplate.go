@@ -100,30 +100,53 @@ type prTemplateData struct {
 	JiraTicket  string
 }
 
-// loadPRTemplate reads and parses the repo's configured pr.template file, if
-// any. Returns (nil, false) when no template is configured, and also (nil,
-// false) - with a warning logged - when the configured template can't be
-// read or parsed, so callers fall back to the built-in body layout instead
-// of failing the run over a template typo.
+// autoDetectPRTemplatePaths are repo-standard GitHub PR template locations
+// (relative to the repo root) checked, in order, when pr.template isn't
+// configured. GitHub itself accepts either casing, so both are checked.
+var autoDetectPRTemplatePaths = []string{
+	filepath.Join(".github", "pull_request_template.md"),
+	filepath.Join(".github", "PULL_REQUEST_TEMPLATE.md"),
+}
+
+// loadPRTemplate reads and parses the repo's PR body template: the
+// explicitly configured pr.template file when set, otherwise the first
+// repo-standard GitHub PR template found relative to sctx.WorkDir
+// (.github/pull_request_template.md or .github/PULL_REQUEST_TEMPLATE.md).
+// Returns (nil, false) when neither is present, and also (nil, false) -
+// with a warning logged - when a configured template can't be read or
+// parsed, so callers fall back to the built-in body layout instead of
+// failing the run over a template typo.
 func loadPRTemplate(sctx *pipeline.StepContext) (*template.Template, bool) {
-	if sctx.Config == nil {
-		return nil, false
+	path := ""
+	configured := ""
+	if sctx.Config != nil {
+		configured = strings.TrimSpace(sctx.Config.PR.Template)
 	}
-	path := strings.TrimSpace(sctx.Config.PR.Template)
-	if path == "" {
-		return nil, false
-	}
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(sctx.WorkDir, path)
+	if configured != "" {
+		path = configured
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(sctx.WorkDir, path)
+		}
+	} else {
+		for _, candidate := range autoDetectPRTemplatePaths {
+			full := filepath.Join(sctx.WorkDir, candidate)
+			if _, err := os.Stat(full); err == nil {
+				path = full
+				break
+			}
+		}
+		if path == "" {
+			return nil, false
+		}
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		slog.Warn("pr.template unreadable, falling back to built-in PR body", "path", sctx.Config.PR.Template, "error", err)
+		slog.Warn("pr.template unreadable, falling back to built-in PR body", "path", path, "error", err)
 		return nil, false
 	}
 	tmpl, err := template.New("pr-body").Parse(string(raw))
 	if err != nil {
-		slog.Warn("pr.template failed to parse, falling back to built-in PR body", "path", sctx.Config.PR.Template, "error", err)
+		slog.Warn("pr.template failed to parse, falling back to built-in PR body", "path", path, "error", err)
 		return nil, false
 	}
 	return tmpl, true
@@ -155,7 +178,11 @@ func finalizePRBody(sctx *pipeline.StepContext, title, branch, whatChanged, risk
 	if tmpl, ok := loadPRTemplate(sctx); ok {
 		rendered, err := renderPRBodyFromTemplate(tmpl, title, branch, whatChanged, cleanedUserIntent(sctx), extractJiraTicket(sctx, branch), riskLine, testingMD, pipelineMD, bodyLimit)
 		if err != nil {
-			slog.Warn("pr.template failed to render, falling back to built-in PR body", "path", sctx.Config.PR.Template, "error", err)
+			path := ""
+			if sctx.Config != nil {
+				path = sctx.Config.PR.Template
+			}
+			slog.Warn("pr.template failed to render, falling back to built-in PR body", "path", path, "error", err)
 		} else {
 			return rendered
 		}

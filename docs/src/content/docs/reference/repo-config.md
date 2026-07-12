@@ -150,9 +150,9 @@ Repo-relative path to a custom PR body template, used instead of the built-in se
 | | |
 |---|---|
 | Type | `string` |
-| Default | Empty (built-in `## What Changed` / `## Risk Assessment` / `## Testing` / `## Pipeline` layout) |
+| Default | Empty - auto-detects `.github/pull_request_template.md` or `.github/PULL_REQUEST_TEMPLATE.md` (first one found, checked in that order); falls back to the built-in `## What Changed` / `## Risk Assessment` / `## Testing` / `## Pipeline` layout if neither exists |
 
-The template is a [Go `text/template`](https://pkg.go.dev/text/template) file. Available placeholders:
+An explicit `pr.template` always takes precedence over auto-detection. Either way, the template is a [Go `text/template`](https://pkg.go.dev/text/template) file. Available placeholders:
 
 | Placeholder | Content |
 |---|---|
@@ -165,7 +165,7 @@ The template is a [Go `text/template`](https://pkg.go.dev/text/template) file. A
 | `{{.Pipeline}}` | Pipeline step narrative (empty when `attribution: false`) |
 | `{{.JiraTicket}}` | Ticket ID extracted from the branch name (see `pr.jira_pattern`), empty if none found |
 
-A template that fails to read or parse falls back to the built-in layout, with a warning logged. This field only affects output formatting, not what commands or agent run, so unlike `commands.*`/`agent`/`document.instructions` it is read from the pushed branch, not gated behind the trusted default-branch copy.
+A template - configured or auto-detected - that fails to read or parse falls back to the built-in layout, with a warning logged. This field only affects output formatting, not what commands or agent run, so unlike `commands.*`/`agent`/`document.instructions` it (and the auto-detected file) is read from the pushed branch, not gated behind the trusted default-branch copy.
 
 ### pr.title_template
 
