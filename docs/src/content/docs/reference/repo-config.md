@@ -143,6 +143,29 @@ It augments or clarifies the built-in policy; it cannot disable documentation in
 
 Like `commands.*` and `agent`, this field steers gate behavior, so it is honored **only from the trusted default-branch copy** of `.no-mistakes.yaml`: a contributor's pushed branch cannot weaken the documentation rules that gate its own review.
 
+### pr.template
+
+Repo-relative path to a custom PR body template, used instead of the built-in section layout.
+
+| | |
+|---|---|
+| Type | `string` |
+| Default | Empty (built-in `## What Changed` / `## Risk Assessment` / `## Testing` / `## Pipeline` layout) |
+
+The template is a [Go `text/template`](https://pkg.go.dev/text/template) file. Available placeholders:
+
+| Placeholder | Content |
+|---|---|
+| `{{.Title}}` | The PR title |
+| `{{.Branch}}` | The branch name |
+| `{{.WhatChanged}}` | Agent-authored summary of the diff (without its built-in heading) |
+| `{{.Intent}}` | User intent text, when available (see [Intent](/no-mistakes/reference/pipeline-steps/#intent)) |
+| `{{.Risk}}` | Risk assessment line |
+| `{{.Testing}}` | Testing section content |
+| `{{.Pipeline}}` | Pipeline step narrative (empty when `attribution: false`) |
+
+A template that fails to read or parse falls back to the built-in layout, with a warning logged. This field only affects output formatting, not what commands or agent run, so unlike `commands.*`/`agent`/`document.instructions` it is read from the pushed branch, not gated behind the trusted default-branch copy.
+
 ### Command process lifetime
 
 All configured `commands.*` entries are scoped to their step.

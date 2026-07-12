@@ -112,6 +112,21 @@ type RepoConfig struct {
 	// EffectiveRepoConfig): a contributor's pushed branch must not be able to
 	// weaken documentation rules for its own review.
 	Document DocumentRaw `yaml:"document"`
+	// PR carries PR body formatting settings (currently just a custom
+	// template path). It only affects output formatting, not what commands
+	// or agent run, so unlike Commands/Agent/Document it is safe to read
+	// from the pushed branch.
+	PR PRRaw `yaml:"pr"`
+}
+
+// PRRaw is the YAML representation of PR-step formatting settings.
+type PRRaw struct {
+	// Template is a repo-relative path to a Go text/template markdown file
+	// used to render the PR body instead of the built-in section layout.
+	// Available placeholders: {{.Title}}, {{.Branch}}, {{.WhatChanged}},
+	// {{.Intent}}, {{.Risk}}, {{.Testing}}, {{.Pipeline}}. Empty means use
+	// the built-in layout.
+	Template string `yaml:"template"`
 }
 
 // DocumentRaw is the YAML representation of document-step settings.
@@ -132,6 +147,7 @@ func (c *RepoConfig) UnmarshalYAML(value *yaml.Node) error {
 		Intent            IntentRaw   `yaml:"intent"`
 		Test              TestRaw     `yaml:"test"`
 		Document          DocumentRaw `yaml:"document"`
+		PR                PRRaw       `yaml:"pr"`
 	}
 	var raw repoConfigRaw
 	if err := value.Decode(&raw); err != nil {
@@ -146,6 +162,7 @@ func (c *RepoConfig) UnmarshalYAML(value *yaml.Node) error {
 	c.Intent = raw.Intent
 	c.Test = raw.Test
 	c.Document = raw.Document
+	c.PR = raw.PR
 	return nil
 }
 
@@ -198,6 +215,14 @@ type Config struct {
 	Intent               Intent
 	Test                 Test
 	Document             Document
+	PR                   PR
+}
+
+// PR is the resolved PR-step formatting config.
+type PR struct {
+	// Template is a repo-relative path to a custom PR body template. Empty
+	// means use the built-in section layout.
+	Template string
 }
 
 // Document is the resolved document-step config. Instructions come from the
@@ -1119,6 +1144,7 @@ func Merge(global *GlobalConfig, repo *RepoConfig) *Config {
 		Intent:               intent,
 		Test:                 test,
 		Document:             Document{Instructions: strings.TrimSpace(repo.Document.Instructions)},
+		PR:                   PR{Template: strings.TrimSpace(repo.PR.Template)},
 	}
 
 	if repo.Agent != "" {

@@ -193,11 +193,7 @@ Diff stat:
 				if content.Title != originalTitle {
 					slog.Warn("tightened agent PR title type", "from", originalTitle, "to", content.Title)
 				}
-				if bodyLimit > 0 {
-					content.Body = assemblePRBody(sctx, content.Body, riskLine, testingMD, pipelineMD, bodyLimit)
-				} else {
-					content.Body = buildPRBody(content.Body, riskLine, testingMD, pipelineMD, sctx)
-				}
+				content.Body = finalizePRBody(sctx, content.Title, branch, content.Body, riskLine, testingMD, pipelineMD, bodyLimit)
 				return content, nil
 			}
 		}
@@ -977,11 +973,7 @@ func fallbackPRContent(sctx *pipeline.StepContext, branch, commitLog, riskLine, 
 	if body == "## What Changed\n\n" {
 		body = fmt.Sprintf("## What Changed\n\n- %s", title)
 	}
-	if bodyLimit > 0 {
-		body = assemblePRBody(sctx, body, riskLine, testingMD, pipelineMD, bodyLimit)
-	} else {
-		body = buildPRBody(body, riskLine, testingMD, pipelineMD, sctx)
-	}
+	body = finalizePRBody(sctx, title, branch, body, riskLine, testingMD, pipelineMD, bodyLimit)
 	return prContent{
 		Title: title,
 		Body:  body,

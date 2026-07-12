@@ -74,6 +74,28 @@ ignore_patterns:
 	}
 }
 
+func TestLoadRepo_PRTemplate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".no-mistakes.yaml")
+	data := "pr:\n  template: .no-mistakes/pr-template.md\n"
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadRepo(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.PR.Template != ".no-mistakes/pr-template.md" {
+		t.Errorf("pr.template = %q, want %q", cfg.PR.Template, ".no-mistakes/pr-template.md")
+	}
+
+	merged := Merge(DefaultGlobalConfig(), cfg)
+	if merged.PR.Template != ".no-mistakes/pr-template.md" {
+		t.Errorf("merged PR.Template = %q, want %q", merged.PR.Template, ".no-mistakes/pr-template.md")
+	}
+}
+
 func TestLoadRepo_AgentAcceptsList(t *testing.T) {
 	dir := t.TempDir()
 	data := `agent: [codex, claude]
