@@ -785,6 +785,40 @@ func TestPRStep_CustomTemplate_RendersConfiguredLayout(t *testing.T) {
 	}
 }
 
+func TestPRStep_CustomTitleTemplate_UsesJiraTicketFromBranch(t *testing.T) {
+	t.Parallel()
+	dir, baseSHA, headSHA := setupGitRepo(t)
+
+	env, logFile := fakeGH(t, "")
+
+	ag := &mockAgent{
+		name: "test",
+		runFn: func(ctx context.Context, opts agent.RunOpts) (*agent.Result, error) {
+			payload := json.RawMessage(`{"title":"fix: improve pipeline header UX","body":"## What Changed\n\n- keep branch status readable"}`)
+			return &agent.Result{Output: payload}, nil
+		},
+	}
+	sctx := newTestContextWithDBRecords(t, ag, dir, baseSHA, headSHA, config.Commands{})
+	sctx.Env = env
+	sctx.Run.Branch = "refs/heads/feature/PROJ-123-improve-header"
+	sctx.Config.PR.TitleTemplate = "{{.Type}}: {{.JiraTicket}} - {{.Description}}"
+
+	step := &PRStep{}
+	if _, err := step.Execute(sctx); err != nil {
+		t.Fatal(err)
+	}
+
+	logData, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ghLog := string(logData)
+
+	if !strings.Contains(ghLog, "--title fix: PROJ-123 - improve pipeline header UX") {
+		t.Fatalf("expected custom title with extracted Jira ticket, got:\n%s", ghLog)
+	}
+}
+
 func TestPRStep_UnwrapsNestedJSONBody(t *testing.T) {
 	t.Parallel()
 	dir, baseSHA, headSHA := setupGitRepo(t)

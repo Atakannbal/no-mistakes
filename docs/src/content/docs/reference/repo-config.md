@@ -166,6 +166,45 @@ The template is a [Go `text/template`](https://pkg.go.dev/text/template) file. A
 
 A template that fails to read or parse falls back to the built-in layout, with a warning logged. This field only affects output formatting, not what commands or agent run, so unlike `commands.*`/`agent`/`document.instructions` it is read from the pushed branch, not gated behind the trusted default-branch copy.
 
+### pr.title_template
+
+A Go `text/template` string that overrides the built-in `type(scope): description` PR title format.
+
+| | |
+|---|---|
+| Type | `string` |
+| Default | Empty (built-in conventional-commit title format) |
+
+Available placeholders:
+
+| Placeholder | Content |
+|---|---|
+| `{{.Type}}` | Conventional-commit type (`feat`, `fix`, `chore`, ...) inferred the same way the built-in title is |
+| `{{.Scope}}` | Conventional-commit scope, when the built-in title has one |
+| `{{.Description}}` | The description portion of the built-in title |
+| `{{.JiraTicket}}` | Ticket ID extracted from the branch name (see `pr.jira_pattern`), empty if none found |
+| `{{.Branch}}` | The branch name |
+
+Example, to match a `type: TICKET-123 - description` house style:
+
+```yaml
+pr:
+  title_template: "{{.Type}}: {{.JiraTicket}} - {{.Description}}"
+```
+
+A template that fails to parse or render, or that renders empty, falls back to the built-in title with a warning logged.
+
+### pr.jira_pattern
+
+Overrides the regexp used to extract `{{.JiraTicket}}` for `pr.title_template` from the branch name.
+
+| | |
+|---|---|
+| Type | `string` (regexp) |
+| Default | `[A-Z][A-Z0-9]+-[0-9]+` (a project-key-then-number pattern, e.g. matches `PROJ-123` anywhere in the branch name) |
+
+An invalid regexp falls back to the default pattern with a warning logged.
+
 ### Command process lifetime
 
 All configured `commands.*` entries are scoped to their step.

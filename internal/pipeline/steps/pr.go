@@ -193,6 +193,9 @@ Diff stat:
 				if content.Title != originalTitle {
 					slog.Warn("tightened agent PR title type", "from", originalTitle, "to", content.Title)
 				}
+				if custom, ok := renderPRTitleFromTemplate(sctx, content.Title, branch); ok {
+					content.Title = custom
+				}
 				content.Body = finalizePRBody(sctx, content.Title, branch, content.Body, riskLine, testingMD, pipelineMD, bodyLimit)
 				return content, nil
 			}
@@ -968,6 +971,9 @@ func fallbackPRContent(sctx *pipeline.StepContext, branch, commitLog, riskLine, 
 		title = "chore: update pull request"
 	} else {
 		title = conventional.TightenTitle(title)
+	}
+	if custom, ok := renderPRTitleFromTemplate(sctx, title, branch); ok {
+		title = custom
 	}
 	body := fmt.Sprintf("## What Changed\n\n%s", strings.TrimSpace(commitLog))
 	if body == "## What Changed\n\n" {

@@ -86,6 +86,39 @@ func TestTightenTitlePrefixesNonConventionalTitles(t *testing.T) {
 	}
 }
 
+func TestParseTitle(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		title           string
+		wantType        string
+		wantScope       string
+		wantDescription string
+		wantOK          bool
+	}{
+		{name: "no scope", title: "fix: correct cache invalidation", wantType: "fix", wantScope: "", wantDescription: "correct cache invalidation", wantOK: true},
+		{name: "with scope", title: "feat(cli): add export command", wantType: "feat", wantScope: "cli", wantDescription: "add export command", wantOK: true},
+		{name: "not conventional", title: "add export command", wantOK: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			typ, scope, description, ok := ParseTitle(tc.title)
+			if ok != tc.wantOK {
+				t.Fatalf("ParseTitle(%q) ok = %v, want %v", tc.title, ok, tc.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if typ != tc.wantType || scope != tc.wantScope || description != tc.wantDescription {
+				t.Fatalf("ParseTitle(%q) = (%q, %q, %q), want (%q, %q, %q)", tc.title, typ, scope, description, tc.wantType, tc.wantScope, tc.wantDescription)
+			}
+		})
+	}
+}
+
 func TestIsTitle(t *testing.T) {
 	t.Parallel()
 

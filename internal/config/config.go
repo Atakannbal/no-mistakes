@@ -127,6 +127,15 @@ type PRRaw struct {
 	// {{.Intent}}, {{.Risk}}, {{.Testing}}, {{.Pipeline}}. Empty means use
 	// the built-in layout.
 	Template string `yaml:"template"`
+	// TitleTemplate is a Go text/template string that overrides the
+	// built-in conventional-commit title format. Available placeholders:
+	// {{.Type}}, {{.Scope}}, {{.Description}}, {{.JiraTicket}}, {{.Branch}}.
+	// Empty means use the built-in "type(scope): description" format.
+	TitleTemplate string `yaml:"title_template"`
+	// JiraPattern overrides the regexp used to extract a ticket ID from the
+	// branch name for the {{.JiraTicket}} title placeholder. Default:
+	// a project-key-then-number pattern like "PROJ-123".
+	JiraPattern string `yaml:"jira_pattern"`
 }
 
 // DocumentRaw is the YAML representation of document-step settings.
@@ -223,6 +232,11 @@ type PR struct {
 	// Template is a repo-relative path to a custom PR body template. Empty
 	// means use the built-in section layout.
 	Template string
+	// TitleTemplate overrides the built-in conventional-commit title
+	// format. Empty means use the built-in format.
+	TitleTemplate string
+	// JiraPattern overrides the default ticket-ID extraction regexp.
+	JiraPattern string
 }
 
 // Document is the resolved document-step config. Instructions come from the
@@ -1144,7 +1158,11 @@ func Merge(global *GlobalConfig, repo *RepoConfig) *Config {
 		Intent:               intent,
 		Test:                 test,
 		Document:             Document{Instructions: strings.TrimSpace(repo.Document.Instructions)},
-		PR:                   PR{Template: strings.TrimSpace(repo.PR.Template)},
+		PR: PR{
+			Template:      strings.TrimSpace(repo.PR.Template),
+			TitleTemplate: strings.TrimSpace(repo.PR.TitleTemplate),
+			JiraPattern:   strings.TrimSpace(repo.PR.JiraPattern),
+		},
 	}
 
 	if repo.Agent != "" {

@@ -23,6 +23,17 @@ var validTypes = map[string]bool{
 
 const ReleaseTypeRule = `- If the change has any user-facing product impact, the type must use feat or fix so release automation can pick it up. Use feat for a new user-visible capability and fix for a user-visible correction or behavior improvement. Use docs, refactor, chore, test, build, or ci only when the change has no user-facing product behavior impact.`
 
+// ParseTitle splits a conventional-commit-format title ("type(scope): desc")
+// into its components. ok is false when title doesn't match that shape.
+func ParseTitle(title string) (typ, scope, description string, ok bool) {
+	m := titleRe.FindStringSubmatch(strings.TrimSpace(title))
+	if len(m) == 0 || !validTypes[m[1]] {
+		return "", "", "", false
+	}
+	scope = strings.Trim(m[2], "()")
+	return m[1], scope, m[4], true
+}
+
 func IsTitle(title string) bool {
 	m := titleRe.FindStringSubmatch(strings.TrimSpace(title))
 	return len(m) > 0 && validTypes[m[1]]

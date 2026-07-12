@@ -4,12 +4,88 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
 
+	"github.com/kunchenguid/no-mistakes/internal/conventional"
 	"github.com/kunchenguid/no-mistakes/internal/pipeline"
 	"github.com/kunchenguid/no-mistakes/internal/scm"
 )
+
+// defaultJiraPattern matches a project-key-then-number ticket ID like
+// "PROJ-123" wherever it appears in a branch name. It intentionally
+// requires an uppercase key so it doesn't match arbitrary lowercase
+// branch-name segments.
+var defaultJiraPattern = regexp.MustCompile(`[A-Z][A-Z0-9]+-[0-9]+`)
+
+// prTitleTemplateData is the set of placeholders available to a custom PR
+// title template configured via pr.title_template in .no-mistakes.yaml.
+type prTitleTemplateData struct {
+	Type        string
+	Scope       string
+	Description string
+	JiraTicket  string
+	Branch      string
+}
+
+// extractJiraTicket pulls a ticket ID out of the branch name using either
+// the repo's configured pr.jira_pattern or defaultJiraPattern. Returns ""
+// when nothing matches.
+func extractJiraTicket(sctx *pipeline.StepContext, branch string) string {
+	re := defaultJiraPattern
+	if sctx.Config != nil && sctx.Config.PR.JiraPattern != "" {
+		compiled, err := regexp.Compile(sctx.Config.PR.JiraPattern)
+		if err != nil {
+			slog.Warn("pr.jira_pattern invalid, using default pattern", "pattern", sctx.Config.PR.JiraPattern, "error", err)
+		} else {
+			re = compiled
+		}
+	}
+	return re.FindString(branch)
+}
+
+// renderPRTitleFromTemplate renders a configured pr.title_template against
+// the components of the built-in, already-tightened conventional-commit
+// title plus a branch-derived Jira ticket ID. Returns ("", false) when no
+// template is configured, or when parsing/rendering fails - callers keep
+// the built-in title in that case.
+func renderPRTitleFromTemplate(sctx *pipeline.StepContext, builtinTitle, branch string) (string, bool) {
+	if sctx.Config == nil {
+		return "", false
+	}
+	tmplText := strings.TrimSpace(sctx.Config.PR.TitleTemplate)
+	if tmplText == "" {
+		return "", false
+	}
+	tmpl, err := template.New("pr-title").Parse(tmplText)
+	if err != nil {
+		slog.Warn("pr.title_template failed to parse, using built-in title", "error", err)
+		return "", false
+	}
+
+	typ, scope, description, ok := conventional.ParseTitle(builtinTitle)
+	if !ok {
+		description = builtinTitle
+	}
+	data := prTitleTemplateData{
+		Type:        typ,
+		Scope:       scope,
+		Description: description,
+		JiraTicket:  extractJiraTicket(sctx, branch),
+		Branch:      branch,
+	}
+	var b strings.Builder
+	if err := tmpl.Execute(&b, data); err != nil {
+		slog.Warn("pr.title_template failed to render, using built-in title", "error", err)
+		return "", false
+	}
+	rendered := strings.TrimSpace(b.String())
+	if rendered == "" {
+		return "", false
+	}
+	return rendered, true
+}
 
 // prTemplateData is the set of placeholders available to a custom PR body
 // template configured via pr.template in .no-mistakes.yaml.
