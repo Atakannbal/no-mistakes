@@ -884,6 +884,199 @@ func TestPRStep_AutoDetectsGitHubTemplate_RendersConfiguredLayout(t *testing.T) 
 	}
 }
 
+// TestPRStep_HeadingOnlyTemplate_FillsBlankSections exercises an ordinary
+// GitHub PR template - plain "## Heading" markdown with no {{...}} syntax,
+// shaped like a real-world template (guidance HTML comments under each
+// heading, a checklist section that has no data-backed field to map to) -
+// and asserts the heuristic fill pass fills the blank, matched sections
+// while leaving the unmatched checklist section untouched.
+func TestPRStep_HeadingOnlyTemplate_FillsBlankSections(t *testing.T) {
+	t.Parallel()
+	dir, baseSHA, headSHA := setupGitRepo(t)
+
+	env, logFile := fakeGH(t, "")
+
+	githubDir := filepath.Join(dir, ".github")
+	if err := os.MkdirAll(githubDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	templateBody := "<!--\n" +
+		"  NOTE: HTML comments like this one are NOT displayed in the PR description.\n" +
+		"-->\n\n" +
+		"## Description\n" +
+		"<!-- Brief description of the change and why it is needed -->\n\n\n" +
+		"## Jira Ticket\n" +
+		"<!-- Link to the related Jira ticket -->\n\n" +
+		"## Changes\n" +
+		"<!-- List the key changes made in this PR -->\n\n" +
+		"## Affected Page(s)\n" +
+		"<!-- Which page(s) does this PR touch? Check all that apply. -->\n" +
+		"- [ ] Frontend (`components/`, `lib/`, `hooks/`)\n" +
+		"- [ ] Backend\n" +
+		"- [ ] CI / DevOps\n\n" +
+		"## Testing\n" +
+		"<!-- How was the change tested? Which scenarios were covered? -->\n"
+	if err := os.WriteFile(filepath.Join(githubDir, "pull_request_template.md"), []byte(templateBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reviewFindings := `{"findings":[],"summary":"clean","risk_level":"medium","risk_rationale":"touches critical error handling"}`
+	testRound1 := `{"findings":[{"id":"test-1","severity":"error","file":"pkg/handler_test.go","line":42,"description":"expected 429 got 200"}],"summary":"1 failure"}`
+
+	ag := &mockAgent{
+		name: "test",
+		runFn: func(ctx context.Context, opts agent.RunOpts) (*agent.Result, error) {
+			payload := json.RawMessage(`{"title":"fix: improve pipeline header UX","body":"## What Changed\n\n- keep branch status readable\n- fix footer truncation"}`)
+			return &agent.Result{Output: payload}, nil
+		},
+	}
+	sctx := newTestContextWithDBRecords(t, ag, dir, baseSHA, headSHA, config.Commands{})
+	sctx.Env = env
+	sctx.Run.Branch = "refs/heads/feature/PROJ-123-improve-header"
+	sctx.UserIntent = "Adds retry logic to the sync worker so transient errors don't fail the run."
+
+	reviewStep, err := sctx.DB.InsertStepResult(sctx.Run.ID, types.StepReview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sctx.DB.UpdateStepStatus(reviewStep.ID, types.StepStatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := sctx.DB.SetStepFindings(reviewStep.ID, reviewFindings); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sctx.DB.InsertStepRound(reviewStep.ID, 1, "initial", &reviewFindings, nil, 500); err != nil {
+		t.Fatal(err)
+	}
+
+	testStep, err := sctx.DB.InsertStepResult(sctx.Run.ID, types.StepTest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sctx.DB.UpdateStepStatus(testStep.ID, types.StepStatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sctx.DB.InsertStepRound(testStep.ID, 1, "initial", &testRound1, nil, 800); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sctx.DB.InsertStepRound(testStep.ID, 2, "auto_fix", nil, nil, 600); err != nil {
+		t.Fatal(err)
+	}
+
+	step := &PRStep{}
+	if _, err := step.Execute(sctx); err != nil {
+		t.Fatal(err)
+	}
+
+	logData, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ghLog := string(logData)
+
+	if !strings.Contains(ghLog, "## Description") {
+		t.Fatalf("expected Description heading preserved, got:\n%s", ghLog)
+	}
+	if !strings.Contains(ghLog, "Adds retry logic to the sync worker") {
+		t.Fatalf("expected Description filled from user intent, got:\n%s", ghLog)
+	}
+	if !strings.Contains(ghLog, "PROJ-123") {
+		t.Fatalf("expected Jira Ticket filled in from the branch name, got:\n%s", ghLog)
+	}
+	if !strings.Contains(ghLog, "keep branch status readable") {
+		t.Fatalf("expected Changes filled from the agent's What Changed content, got:\n%s", ghLog)
+	}
+	testingIdx := strings.Index(ghLog, "## Testing")
+	if testingIdx < 0 {
+		t.Fatalf("expected Testing heading preserved, got:\n%s", ghLog)
+	}
+	if strings.TrimSpace(ghLog[testingIdx+len("## Testing"):]) == "<!-- How was the change tested? Which scenarios were covered? -->" {
+		t.Fatalf("expected Testing section filled with pipeline testing content, got:\n%s", ghLog)
+	}
+
+	affectedIdx := strings.Index(ghLog, "## Affected Page(s)")
+	if affectedIdx < 0 {
+		t.Fatalf("expected Affected Page(s) heading preserved, got:\n%s", ghLog)
+	}
+	affectedSection := ghLog[affectedIdx:testingIdx]
+	if !strings.Contains(affectedSection, "- [ ] Frontend (`components/`, `lib/`, `hooks/`)") ||
+		!strings.Contains(affectedSection, "- [ ] Backend") ||
+		!strings.Contains(affectedSection, "- [ ] CI / DevOps") {
+		t.Fatalf("expected Affected Page(s) checklist left byte-for-byte untouched, got:\n%s", affectedSection)
+	}
+	if strings.Contains(affectedSection, "Adds retry logic") || strings.Contains(affectedSection, "PROJ-123") || strings.Contains(affectedSection, "keep branch status readable") {
+		t.Fatalf("expected no field content leaking into the unmatched Affected Page(s) section, got:\n%s", affectedSection)
+	}
+}
+
+// TestPRStep_TemplateWithGoActions_SkipsHeadingHeuristic is the most
+// important regression guard for this feature: a resolved template that
+// already contains {{...}} Go text/template syntax anywhere must render
+// exactly as it always has - parsed and executed as a Go template - even
+// though it also has a "## Description" heading whose body is blank. The
+// heading-heuristic fill pass must never run for such a template, since an
+// author who already opted into {{.Field}} placeholders controls their
+// template's meaning explicitly and a heuristic overwrite would silently
+// change it.
+func TestPRStep_TemplateWithGoActions_SkipsHeadingHeuristic(t *testing.T) {
+	t.Parallel()
+	dir, baseSHA, headSHA := setupGitRepo(t)
+
+	env, logFile := fakeGH(t, "")
+
+	templatePath := filepath.Join(dir, "pr-template.md")
+	templateBody := "# {{.Title}}\n\n" +
+		"## Description\n" +
+		"<!-- Brief description of the change and why it is needed -->\n\n" +
+		"## Changes\n{{.WhatChanged}}\n"
+	if err := os.WriteFile(templatePath, []byte(templateBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ag := &mockAgent{
+		name: "test",
+		runFn: func(ctx context.Context, opts agent.RunOpts) (*agent.Result, error) {
+			payload := json.RawMessage(`{"title":"fix: improve pipeline header UX","body":"## What Changed\n\n- keep branch status readable"}`)
+			return &agent.Result{Output: payload}, nil
+		},
+	}
+	sctx := newTestContextWithDBRecords(t, ag, dir, baseSHA, headSHA, config.Commands{})
+	sctx.Env = env
+	sctx.Config.PR.Template = "pr-template.md"
+	sctx.Run.Branch = "refs/heads/feature/PROJ-123-improve-header"
+	sctx.UserIntent = "Adds retry logic to the sync worker so transient errors don't fail the run."
+
+	step := &PRStep{}
+	if _, err := step.Execute(sctx); err != nil {
+		t.Fatal(err)
+	}
+
+	logData, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ghLog := string(logData)
+
+	if !strings.Contains(ghLog, "# fix: improve pipeline header UX") {
+		t.Fatalf("expected Go-template title rendered, got:\n%s", ghLog)
+	}
+	if !strings.Contains(ghLog, "keep branch status readable") {
+		t.Fatalf("expected {{.WhatChanged}} rendered normally, got:\n%s", ghLog)
+	}
+	if strings.Contains(ghLog, "Adds retry logic to the sync worker") {
+		t.Fatalf("expected heading heuristic NOT applied (blank Description must stay blank, not filled from user intent), got:\n%s", ghLog)
+	}
+	descIdx := strings.Index(ghLog, "## Description")
+	changesIdx := strings.Index(ghLog, "## Changes")
+	if descIdx < 0 || changesIdx < 0 || changesIdx < descIdx {
+		t.Fatalf("expected both headings present in order, got:\n%s", ghLog)
+	}
+	descSection := ghLog[descIdx:changesIdx]
+	if strings.TrimSpace(descSection) != "## Description\n<!-- Brief description of the change and why it is needed -->" {
+		t.Fatalf("expected Description section rendered verbatim (untouched by the heuristic), got:\n%q", descSection)
+	}
+}
+
 func TestPRStep_CustomTitleTemplate_UsesJiraTicketFromBranch(t *testing.T) {
 	t.Parallel()
 	dir, baseSHA, headSHA := setupGitRepo(t)

@@ -152,7 +152,7 @@ Repo-relative path to a custom PR body template, used instead of the built-in se
 | Type | `string` |
 | Default | Empty - auto-detects `.github/pull_request_template.md` or `.github/PULL_REQUEST_TEMPLATE.md` (first one found, checked in that order); falls back to the built-in `## What Changed` / `## Risk Assessment` / `## Testing` / `## Pipeline` layout if neither exists |
 
-An explicit `pr.template` always takes precedence over auto-detection. Either way, the template is a [Go `text/template`](https://pkg.go.dev/text/template) file. Available placeholders:
+An explicit `pr.template` always takes precedence over auto-detection. Either way, the template's rendering mode is chosen automatically from its content: a template containing `{{` anywhere is parsed and executed as a [Go `text/template`](https://pkg.go.dev/text/template) file, using the placeholders below. Available placeholders:
 
 | Placeholder | Content |
 |---|---|
@@ -164,6 +164,19 @@ An explicit `pr.template` always takes precedence over auto-detection. Either wa
 | `{{.Testing}}` | Testing section content |
 | `{{.Pipeline}}` | Pipeline step narrative (empty when `attribution: false`) |
 | `{{.JiraTicket}}` | Ticket ID extracted from the branch name (see `pr.jira_pattern`), empty if none found |
+
+A template with no `{{` anywhere - an ordinary GitHub PR template written as plain markdown headings, such as GitHub's own default `.github/pull_request_template.md` convention - is instead filled with a heading heuristic: each `## Heading` is matched, case-insensitively, against a fixed set of synonyms and, when matched, filled with the corresponding placeholder value above if (and only if) its section body is currently blank.
+
+| Heading synonyms | Filled from |
+|---|---|
+| Description, Summary, Overview | `{{.Intent}}` |
+| Changes, What Changed, Key Changes | `{{.WhatChanged}}` |
+| Testing, Test Plan, Tests | `{{.Testing}}` |
+| Risk, Risk Assessment, Risks | `{{.Risk}}` |
+| Jira, Ticket, Jira Ticket, Issue | `{{.JiraTicket}}` |
+| Pipeline | `{{.Pipeline}}` |
+
+A section counts as blank once any HTML guidance comment (`<!-- ... -->`) is stripped from it; the value is inserted on its own line below the comment, which is left in place. This heuristic never overwrites existing content: a heading with no synonym match (e.g. a checklist like "Affected Page(s)"), a section that already has real content (from a human or a prior run), or a matched section whose placeholder value is itself empty (e.g. no Jira ticket found in the branch name) is all left byte-for-byte untouched.
 
 A template - configured or auto-detected - that fails to read or parse falls back to the built-in layout, with a warning logged. This field only affects output formatting, not what commands or agent run, so unlike `commands.*`/`agent`/`document.instructions` it (and the auto-detected file) is read from the pushed branch, not gated behind the trusted default-branch copy.
 
