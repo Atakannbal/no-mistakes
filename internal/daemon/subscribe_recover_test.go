@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kunchenguid/no-mistakes/internal/db"
+	"github.com/kunchenguid/no-mistakes/internal/gate"
 	gitpkg "github.com/kunchenguid/no-mistakes/internal/git"
 	"github.com/kunchenguid/no-mistakes/internal/ipc"
 	"github.com/kunchenguid/no-mistakes/internal/paths"
@@ -561,6 +562,35 @@ func TestRecoverIsolatesGateRepoHooksPath(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(out)); got != "true" {
 		t.Fatalf("receive.advertisePushOptions = %q, want true", got)
+	}
+}
+
+// TestMigrateGateConfigsSkipsLocalOriginShims: local-origin shims live in the
+// repos dir alongside gate bare repos, but they are plain origins - if the
+// startup sweep installed the managed post-receive hook into one, every push
+// into the shim would surface an "unknown repo for gate" failure.
+func TestMigrateGateConfigsSkipsLocalOriginShims(t *testing.T) {
+	tmpDir := t.TempDir()
+	p := paths.WithRoot(tmpDir)
+	if err := p.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	shimDir := gate.LocalOriginDir(p, "localrepo")
+	if err := gitpkg.InitBare(ctx, shimDir); err != nil {
+		t.Fatal(err)
+	}
+
+	migrateGateConfigs(ctx, p)
+
+	hookPath := filepath.Join(shimDir, "hooks", "post-receive")
+	if _, err := os.Stat(hookPath); !os.IsNotExist(err) {
+		t.Errorf("managed post-receive hook must not be installed into a local-origin shim, stat err = %v", err)
+	}
+	out, err := exec.Command("git", "-C", shimDir, "config", "--get", "receive.advertisePushOptions").CombinedOutput()
+	if err == nil {
+		t.Errorf("shim should not receive gate push-option config, got %q", strings.TrimSpace(string(out)))
 	}
 }
 

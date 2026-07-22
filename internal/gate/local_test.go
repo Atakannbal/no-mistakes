@@ -139,6 +139,43 @@ func TestInitLocalIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestInitLocalRefusesPreexistingShimWithoutOrigin(t *testing.T) {
+	work := setupLocalTestRepo(t, "main")
+	p := setupTestPaths(t)
+	d := openTestDB(t, p)
+	ctx := context.Background()
+
+	repo, _, err := InitWithOptions(ctx, d, p, work, InitOptions{Local: true})
+	if err != nil {
+		t.Fatalf("init --local: %v", err)
+	}
+	shim := LocalOriginDir(p, repo.ID)
+
+	// Sever the origin wiring but leave the shim behind, then re-init from a
+	// different branch: the fresh-creation path must refuse to adopt the
+	// surviving shim rather than repoint its HEAD, seed into it, or remove it.
+	if out, err := exec.Command("git", "-C", work, "remote", "remove", "origin").CombinedOutput(); err != nil {
+		t.Fatalf("remove origin: %v: %s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", work, "checkout", "-b", "feature/y").CombinedOutput(); err != nil {
+		t.Fatalf("checkout: %v: %s", err, out)
+	}
+
+	_, _, err = InitWithOptions(ctx, d, p, work, InitOptions{Local: true})
+	if err == nil {
+		t.Fatal("expected error when a stale shim already exists")
+	}
+	if !strings.Contains(err.Error(), "already exists") || !strings.Contains(err.Error(), "git remote add origin") {
+		t.Errorf("error should carry recovery guidance, got: %v", err)
+	}
+	if _, statErr := os.Stat(shim); statErr != nil {
+		t.Errorf("pre-existing shim must survive the refusal, stat err = %v", statErr)
+	}
+	if got := gitOut(t, "-C", shim, "symbolic-ref", "HEAD"); got != "refs/heads/main" {
+		t.Errorf("shim HEAD after refusal = %q, want refs/heads/main", got)
+	}
+}
+
 func TestInitLocalPlainReinitPreservesLocalMode(t *testing.T) {
 	work := setupLocalTestRepo(t, "main")
 	p := setupTestPaths(t)

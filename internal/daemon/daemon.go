@@ -14,6 +14,7 @@ import (
 	"github.com/kunchenguid/no-mistakes/internal/agent"
 	"github.com/kunchenguid/no-mistakes/internal/config"
 	"github.com/kunchenguid/no-mistakes/internal/db"
+	"github.com/kunchenguid/no-mistakes/internal/gate"
 	"github.com/kunchenguid/no-mistakes/internal/git"
 	"github.com/kunchenguid/no-mistakes/internal/ipc"
 	"github.com/kunchenguid/no-mistakes/internal/paths"
@@ -377,6 +378,12 @@ func migrateGateConfigs(ctx context.Context, p *paths.Paths) {
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() {
+			continue
+		}
+		// Local-origin shims share the repos dir but are plain origins, not
+		// gates: installing the managed post-receive hook there would make
+		// every shim push report "unknown repo for gate".
+		if gate.IsLocalOriginDirName(entry.Name()) {
 			continue
 		}
 		bareDir := filepath.Join(p.ReposDir(), entry.Name())

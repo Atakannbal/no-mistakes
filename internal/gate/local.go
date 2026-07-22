@@ -23,6 +23,14 @@ func LocalOriginDir(p *paths.Paths, repoID string) string {
 	return filepath.Join(p.ReposDir(), repoID+localOriginSuffix)
 }
 
+// IsLocalOriginDirName reports whether a repos-dir entry name is a
+// local-origin shim rather than a gate bare repo. Shims are plain origins the
+// pipeline and the user push to directly; they must never receive gate wiring
+// such as the managed post-receive hook.
+func IsLocalOriginDirName(name string) bool {
+	return strings.HasSuffix(name, localOriginSuffix)
+}
+
 // IsLocalOrigin reports whether upstreamURL points at a local-origin shim
 // under p's repos dir - i.e. whether the repo runs in local mode. This is the
 // one marker the rest of the system keys local-mode behavior off (there is no
@@ -75,6 +83,17 @@ func provisionLocalOrigin(ctx context.Context, p *paths.Paths, absRoot, id strin
 	}
 	if branch == "HEAD" {
 		return false, fmt.Errorf("detached HEAD: check out the repository's default branch before running `no-mistakes init --local`")
+	}
+
+	// Fresh creation only ever works against a directory this call makes: an
+	// existing shim with no origin remote pointing at it is ambiguous state
+	// (its HEAD and refs may not match this checkout), so refuse instead of
+	// adopting it - never repoint its HEAD, never seed into it, and never
+	// remove it on a later failure.
+	if _, err := os.Stat(shimDir); err == nil {
+		return false, fmt.Errorf("local origin shim %s already exists but is not wired as this repository's origin; to keep its history run `git remote add origin %s`, or if it is stale remove it (`rm -rf %s`) and re-run `no-mistakes init --local`", shimDir, shimDir, shimDir)
+	} else if !os.IsNotExist(err) {
+		return false, fmt.Errorf("check local origin shim %s: %w", shimDir, err)
 	}
 
 	if err := git.InitBare(ctx, shimDir); err != nil {
