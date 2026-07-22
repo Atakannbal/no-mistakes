@@ -28,11 +28,13 @@ Initialize or refresh the gate for the current repository.
 ```sh
 no-mistakes init
 no-mistakes init --fork-url git@github.com:you/my-repo.git
+no-mistakes init --local
 ```
 
 | Flag         | Type     | Default | Description                                                                   |
 | ------------ | -------- | ------- | ----------------------------------------------------------------------------- |
 | `--fork-url` | `string` | (none)  | GitHub fork remote URL to push branches to while opening PRs against `origin` |
+| `--local`    | `bool`   | `false` | Set up [local mode](/no-mistakes/guides/local-mode/) for a repository with no remote: provision a managed local origin so the full pipeline runs without any network host (mutually exclusive with `--fork-url`) |
 
 Creates or refreshes a local bare repo, installs the post-receive hook, best-effort isolates the gate repo's hook path from shared git config changes when Git supports `config --worktree`, adds or repairs the `no-mistakes` git remote, detects the default branch, records or updates the repo in SQLite, installs the `/no-mistakes` agent skill at user level into `~/.claude/skills/no-mistakes/SKILL.md` and `~/.agents/skills/no-mistakes/SKILL.md`, and ensures the daemon is running, installing the managed service when available and falling back to a detached daemon otherwise.
 `init` writes no skill files into the repo; the user-level copies cover every supported agent (`~/.claude/skills` for Claude Code, `~/.agents/skills` for Codex, OpenCode, Rovo Dev, and Pi) across all repos.
@@ -212,6 +214,7 @@ no-mistakes eject
 ```
 
 Removes the `no-mistakes` remote, deletes the bare repo directory, cleans up worktrees, and deletes the database record (cascades to runs and steps).
+In a [local-mode](/no-mistakes/guides/local-mode/) repo, it also removes the `origin` remote wiring and deletes the managed local origin.
 It does not remove any legacy repo-local agent skill files left by older versions; current `init` installs the skill at user level instead.
 
 ## no-mistakes attach

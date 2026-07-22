@@ -42,6 +42,7 @@ type Harness struct {
 
 	agentName         string // claude / codex / opencode
 	allowRepoCommands *bool  // mirrors SetupOpts.AllowRepoCommands
+	localMode         bool   // mirrors SetupOpts.LocalMode
 }
 
 // SetupOpts controls per-test setup.
@@ -65,6 +66,12 @@ type SetupOpts struct {
 	// (commands must come from the trusted default branch) pass a pointer
 	// to false to exercise the secure default.
 	AllowRepoCommands *bool
+
+	// LocalMode skips fabricating the bare upstream and the origin remote,
+	// modeling a purely local repository (no remote at all). Tests then
+	// exercise `no-mistakes init --local`, which provisions the local-origin
+	// shim under NM_HOME itself.
+	LocalMode bool
 }
 
 const e2eDaemonStartTimeout = "45s"
@@ -99,6 +106,7 @@ func NewHarness(t *testing.T, opts SetupOpts) *Harness {
 		Scenario:          opts.Scenario,
 		agentName:         opts.Agent,
 		allowRepoCommands: opts.AllowRepoCommands,
+		localMode:         opts.LocalMode,
 	}
 
 	for _, dir := range []string{h.BinDir, h.NMHome, h.HomeDir, h.WorkDir} {
@@ -217,11 +225,14 @@ func (h *Harness) initGitRepos() {
 
 	// Bare upstream. file:// URL is intentionally unsupported by
 	// scm.DetectProvider, which is what causes the PR and CI steps to
-	// gracefully skip in the e2e happy path.
-	if err := os.MkdirAll(h.UpstreamDir, 0o755); err != nil {
-		h.t.Fatalf("mkdir upstream: %v", err)
+	// gracefully skip in the e2e happy path. Local-mode tests model a repo
+	// with no remote at all, so they get no upstream and no origin.
+	if !h.localMode {
+		if err := os.MkdirAll(h.UpstreamDir, 0o755); err != nil {
+			h.t.Fatalf("mkdir upstream: %v", err)
+		}
+		mustGit(h.UpstreamDir, "init", "--bare", "--initial-branch=main")
 	}
-	mustGit(h.UpstreamDir, "init", "--bare", "--initial-branch=main")
 
 	mustGit(h.WorkDir, "init", "--initial-branch=main")
 	mustGit(h.WorkDir, "config", "user.email", "e2e@example.com")
@@ -250,8 +261,10 @@ func (h *Harness) initGitRepos() {
 	}
 	mustGit(h.WorkDir, "add", "README.md", ".no-mistakes.yaml")
 	mustGit(h.WorkDir, "commit", "-m", "initial commit")
-	mustGit(h.WorkDir, "remote", "add", "origin", h.UpstreamDir)
-	mustGit(h.WorkDir, "push", "-u", "origin", "main")
+	if !h.localMode {
+		mustGit(h.WorkDir, "remote", "add", "origin", h.UpstreamDir)
+		mustGit(h.WorkDir, "push", "-u", "origin", "main")
+	}
 }
 
 // Run invokes the no-mistakes binary in the working repo and returns
