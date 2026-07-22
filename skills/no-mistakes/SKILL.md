@@ -168,6 +168,12 @@ Run the pipeline and decide on its findings as they come up:
      in the background until it is merged, closed, or its configured idle
      timeout elapses, so a human can watch it in the TUI.
    - `passed` - the changes cleared the gate and the PR was merged or closed.
+     In a local-mode repo (set up with `no-mistakes init --local`; no remote,
+     no PR, no CI) `passed` instead means every check is green and the branch
+     is ready to merge locally. The `help` line carries the exact command -
+     `git fetch no-mistakes <branch> && git merge --ff-only FETCH_HEAD`, run
+     on the default branch - relay it to the user and never claim a PR was
+     opened or merged for a local-mode run.
    - `failed` or `cancelled` - they did not; read the output and address it.
      Fix whatever the output points at (a failing test, a lint error, a finding
      you skipped), commit the fix on the same feature branch, then drive the

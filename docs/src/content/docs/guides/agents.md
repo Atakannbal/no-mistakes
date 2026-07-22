@@ -147,6 +147,9 @@ That is a successful agent stopping point: report that the PR is ready and ask t
 Successful outcomes also instruct the agent to summarize the run for the user.
 When the pipeline applied fixes, successful outcomes include a `fixes` table listing each fix so the agent can acknowledge what it missed and the user can review them.
 
+In a [local-mode repo](/no-mistakes/guides/local-mode/) (set up with `no-mistakes init --local`; no remote, no PR, no CI), a completed run's `outcome: passed` instead means every check is green and the branch is ready to merge locally.
+The output's help line carries the exact command - `git fetch no-mistakes <branch> && git merge --ff-only FETCH_HEAD`, run on the default branch - and the agent relays it and must never claim a PR was opened or merged for a local-mode run.
+
 If that PR later falls behind the default branch or hits a merge conflict - commonly because another PR merged first - the agent runs no command and must never hand-rebase.
 The CI monitor stays live in the background after checks pass, and when it sees an actual conflict it rebases onto the base, resolves it, and re-pushes the branch itself, so no agent or user action is needed.
 A PR that is merely behind but still clean needs nothing either, since the platform merges it.

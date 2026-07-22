@@ -152,7 +152,7 @@ func runAxiRun(cmd *cobra.Command, autoYes bool, skipSteps []types.StepName, int
 	if err != nil {
 		return emitError(cmd, 1, fmt.Sprintf("drive run: %v", err))
 	}
-	return renderDriveResult(cmd, run, ciReady)
+	return renderDriveResult(cmd, run, ciReady, localModeFor(env))
 }
 
 func configErrorForFreshAxiRun(env *axiEnv, runID string) error {
@@ -517,13 +517,42 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 	}
 }
 
+// localModeInfo marks a run on a local-mode repo (origin is the shim
+// provisioned by `init --local`) and carries what renderDriveResult needs to
+// phrase its completed help line. A nil value means normal remote mode.
+type localModeInfo struct {
+	defaultBranch string
+}
+
+// localModeFor resolves whether the env's repo runs in local mode.
+func localModeFor(env *axiEnv) *localModeInfo {
+	if env == nil || env.repo == nil || !gate.IsLocalOrigin(env.p, env.repo.UpstreamURL) {
+		return nil
+	}
+	return &localModeInfo{defaultBranch: env.repo.DefaultBranch}
+}
+
+// localMergeHelp is the completed-run help for a local-mode repo. There is no
+// PR anywhere in the flow, so the terminal state is "checks green, ready for
+// a local ff-merge": hand the agent the exact merge command and pin the claim
+// it must never make. The canonical phrases are guarded by
+// TestLocalMergeGuidance_* alongside the skill body and agents guide.
+func localMergeHelp(branch, defaultBranch string) []string {
+	return []string{
+		fmt.Sprintf("Checks green - merge locally: `git fetch no-mistakes %s && git merge --ff-only FETCH_HEAD` (on %s)", branch, defaultBranch),
+		fmt.Sprintf("This repo runs in local mode: there is no PR, so never claim a PR was opened or merged. After the local merge, sync the managed origin with `git push origin %s`.", defaultBranch),
+	}
+}
+
 // renderDriveResult prints the run snapshot plus one of: the active gate (exit
 // 0, a normal decision point), a checks-passed outcome (exit 0, CI is green and
 // the PR is ready for a human to merge), or the terminal outcome (exit 0 when
 // passed, exit 1 when blocked, failed, or cancelled). Successful outcomes also
 // carry the fixes the pipeline applied and reporting instructions, so the agent
-// closes the loop with the user instead of stopping at "it passed".
-func renderDriveResult(cmd *cobra.Command, run *ipc.RunInfo, ciReady bool) error {
+// closes the loop with the user instead of stopping at "it passed". For a
+// local-mode repo (local non-nil) a completed run's help hands off the local
+// ff-merge instead of a PR link.
+func renderDriveResult(cmd *cobra.Command, run *ipc.RunInfo, ciReady bool, local *localModeInfo) error {
 	rv := runViewFromIPC(run)
 	fields := []toon.Field{runObjectField(rv)}
 
@@ -560,7 +589,9 @@ func renderDriveResult(cmd *cobra.Command, run *ipc.RunInfo, ciReady bool) error
 		fixes := rv.fixRows()
 		fields = appendFixesField(fields, fixes)
 		var help []string
-		if rv.PRURL != "" {
+		if local != nil {
+			help = append(help, localMergeHelp(rv.Branch, local.defaultBranch)...)
+		} else if rv.PRURL != "" {
 			help = append(help, fmt.Sprintf("Open the PR: %s", rv.PRURL))
 		}
 		help = append(help, successReportHelp(fixes)...)
@@ -734,7 +765,7 @@ func runAxiRespond(cmd *cobra.Command, ra respondArgs) error {
 	if err != nil {
 		return emitError(cmd, 1, fmt.Sprintf("drive run: %v", err))
 	}
-	return renderDriveResult(cmd, final, ciReady)
+	return renderDriveResult(cmd, final, ciReady, localModeFor(env))
 }
 
 // gateStatusFor returns the current status of step in rv, defaulting to the

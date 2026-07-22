@@ -22,6 +22,12 @@ Safest local verification sequence after non-trivial changes:
 - GitHub PR code must keep `--repo` pointed at the parent and use `--head <fork_owner>:<branch>` when `fork_url` is set; existing-PR lookup must list by the bare branch and filter head-owner fields, never pass `<owner>:<branch>` to `gh pr list --head`.
 - GitLab and Bitbucket fork MR/PR routing is intentionally out of scope until implemented end to end; if a legacy row has `fork_url` for those hosts, PR creation must skip instead of opening a self PR.
 
+**Local Mode (`internal/gate/local.go`)**
+
+- `init --local` wires a no-remote repo to a shim bare origin at `<NM_HOME>/repos/<id>-origin.git` so every remote-bound stage (rebase base, push lease, trusted-config fetch) works unchanged and PR/CI self-skip via `ProviderUnknown`. There is no schema column: `gate.IsLocalOrigin` on `repos.upstream_url` is the single local-mode marker; keep it in sync with `LocalOriginDir`.
+- The completed-run wording is mode-aware ("merge locally", never a PR claim); its canonical phrases are pinned across the skill body, agents guide, and `renderDriveResult` output by `TestLocalMergeGuidance_*` in `internal/cli/axi_guidance_test.go`. User-facing semantics are owned by `docs/src/content/docs/guides/local-mode.md`, including the v1 known limitation (no CI final-head re-verify; a local verify pass is the planned follow-up).
+- e2e coverage: `SetupOpts.LocalMode` in the harness skips fabricating the remote; `internal/e2e/local_mode_test.go` covers init, run-to-passed with the ff-merge handoff, and eject (which removes the shim).
+
 **GitLab Backend (`internal/scm/gitlab`)**
 
 - The backend is pinned against `glab v1.5x`, whose flag surface drifts between versions: the auth check must be host-scoped (`--hostname <host>`, falling back to unscoped only when the host is unknown), `glab mr list` no longer accepts `--state opened`, and the daemon's detached-HEAD worktree breaks `glab ci get`, so pipeline jobs are read via the branch-independent `glab api .../pipelines/<id>/jobs` REST endpoint.

@@ -17,13 +17,17 @@ const banner = `_  _ ____    _  _ _ ____ ___ ____ _  _ ____ ____
 
 func newInitCmd() *cobra.Command {
 	var forkURL string
+	var local bool
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize no-mistakes gate for the current repository",
 		Long: "Sets up or refreshes a local bare repo as a gate, installs a post-receive hook,\n" +
 			"best-effort isolates the gate hook path from shared local git config writes when Git supports `config --worktree`,\n" +
 			"adds or repairs the \"no-mistakes\" git remote, and records the repo in the database.\n\n" +
-			"Run this from inside a git repository that has an \"origin\" remote.",
+			"Run this from inside a git repository that has an \"origin\" remote.\n" +
+			"For a purely local repository with no remote at all, pass --local: a private\n" +
+			"bare repo under the no-mistakes home is provisioned and wired up as origin, so\n" +
+			"the full pipeline runs locally and PR/CI steps skip.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return trackCommand("init", func() error {
@@ -36,7 +40,7 @@ func newInitCmd() *cobra.Command {
 				if cmd.Flags().Changed("fork-url") && strings.TrimSpace(forkURL) == "" {
 					return fmt.Errorf("init: --fork-url must not be empty")
 				}
-				repo, created, err := gate.InitWithFork(cmd.Context(), d, p, ".", forkURL)
+				repo, created, err := gate.InitWithOptions(cmd.Context(), d, p, ".", gate.InitOptions{ForkURL: forkURL, Local: local})
 				if err != nil {
 					return fmt.Errorf("init: %w", err)
 				}
@@ -71,7 +75,11 @@ func newInitCmd() *cobra.Command {
 				if repo.ForkURL != "" {
 					remoteURL = safeurl.Redact(remoteURL)
 				}
-				fmt.Fprintf(w, "  %s  %s\n", sDim.Render("remote"), remoteURL)
+				if gate.IsLocalOrigin(p, repo.UpstreamURL) {
+					fmt.Fprintf(w, "  %s  %s %s\n", sDim.Render("remote"), remoteURL, sDim.Render("(local mode: managed local origin, no network remote)"))
+				} else {
+					fmt.Fprintf(w, "  %s  %s\n", sDim.Render("remote"), remoteURL)
+				}
 				if repo.ForkURL != "" {
 					fmt.Fprintf(w, "  %s  %s\n", sDim.Render("  fork"), safeurl.Redact(repo.ForkURL))
 				}
@@ -91,5 +99,7 @@ func newInitCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&forkURL, "fork-url", "", "GitHub fork remote URL to push branches to while opening PRs against origin")
+	cmd.Flags().BoolVar(&local, "local", false, "set up local mode for a repository with no remote: provision a managed local origin so the full pipeline runs without any network host")
+	cmd.MarkFlagsMutuallyExclusive("fork-url", "local")
 	return cmd
 }

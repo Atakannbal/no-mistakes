@@ -46,7 +46,29 @@ func Init(ctx context.Context, d *db.DB, p *paths.Paths, workDir string) (*db.Re
 // remains the parent repository used for PRs. When forkURL is empty, an
 // existing fork setting is preserved across idempotent refreshes.
 func InitWithFork(ctx context.Context, d *db.DB, p *paths.Paths, workDir, forkURL string) (*db.Repo, bool, error) {
-	forkURL = strings.TrimSpace(forkURL)
+	return InitWithOptions(ctx, d, p, workDir, InitOptions{ForkURL: forkURL})
+}
+
+// InitOptions controls optional init behaviors.
+type InitOptions struct {
+	// ForkURL is an optional GitHub fork push URL (see InitWithFork).
+	ForkURL string
+	// Local sets up "local mode" for a working repo that has no origin remote:
+	// a private bare repo (the local-origin shim) is provisioned under the
+	// no-mistakes home and wired up as the repo's origin. Every remote-bound
+	// pipeline stage then works against that local path unchanged - the rebase
+	// base, the push target with its force-push lease, and the trusted-config
+	// fetch - while PR and CI self-skip because a filesystem path resolves to
+	// no supported provider.
+	Local bool
+}
+
+// InitWithOptions is Init with the full option set.
+func InitWithOptions(ctx context.Context, d *db.DB, p *paths.Paths, workDir string, opts InitOptions) (*db.Repo, bool, error) {
+	forkURL := strings.TrimSpace(opts.ForkURL)
+	if opts.Local && forkURL != "" {
+		return nil, false, fmt.Errorf("--local cannot be combined with --fork-url: a local repository has no fork to route to")
+	}
 
 	// Normalize worktrees back to the main repo root so one repo record works
 	// from either the main checkout or any attached worktree.
@@ -72,6 +94,31 @@ func InitWithFork(ctx context.Context, d *db.DB, p *paths.Paths, workDir, forkUR
 		}
 	}
 
+	id := repoID(absRoot)
+	if existing != nil {
+		id = existing.ID
+	}
+
+	// Local mode provisions (or repairs) the shim origin before the origin
+	// URL is read, so everything downstream sees a normal origin remote.
+	var localOriginCreated bool
+	if opts.Local {
+		created, err := provisionLocalOrigin(ctx, p, absRoot, id)
+		if err != nil {
+			return nil, false, err
+		}
+		localOriginCreated = created
+	}
+	// Only tear down local-origin wiring this call created; a later failure
+	// must never strip a pre-existing shim from a working local-mode repo.
+	rollbackLocalOrigin := func() {
+		if !localOriginCreated {
+			return
+		}
+		git.RemoveRemote(ctx, absRoot, "origin")
+		os.RemoveAll(LocalOriginDir(p, id))
+	}
+
 	// Read origin URL. Keep the historical rewritten value for non-fork repos,
 	// but preserve the literal parent URL when fork routing is configured.
 	getOriginURL := git.GetRemoteURL
@@ -80,18 +127,15 @@ func InitWithFork(ctx context.Context, d *db.DB, p *paths.Paths, workDir, forkUR
 	}
 	upstreamURL, err := getOriginURL(ctx, absRoot, "origin")
 	if err != nil {
-		return nil, false, fmt.Errorf("get origin url: %w", err)
+		return nil, false, fmt.Errorf("get origin url: %w (for a repository with no remote at all, run `no-mistakes init --local`)", err)
 	}
 	if forkURL != "" {
 		if err := validateForkRouting(upstreamURL, forkURL); err != nil {
+			rollbackLocalOrigin()
 			return nil, false, err
 		}
 	}
 
-	id := repoID(absRoot)
-	if existing != nil {
-		id = existing.ID
-	}
 	bareDir := p.RepoDir(id)
 
 	// Provision (or repair) the on-disk gate. This is idempotent.
@@ -103,6 +147,7 @@ func InitWithFork(ctx context.Context, d *db.DB, p *paths.Paths, workDir, forkUR
 				git.RemoveRemote(ctx, absRoot, RemoteName)
 			}
 			os.RemoveAll(bareDir)
+			rollbackLocalOrigin()
 		}
 		return nil, false, err
 	}
@@ -130,6 +175,7 @@ func InitWithFork(ctx context.Context, d *db.DB, p *paths.Paths, workDir, forkUR
 		// Rollback: remove remote and bare repo.
 		git.RemoveRemote(ctx, absRoot, RemoteName)
 		os.RemoveAll(bareDir)
+		rollbackLocalOrigin()
 		return nil, false, fmt.Errorf("insert repo: %w", err)
 	}
 
@@ -266,6 +312,16 @@ func Eject(ctx context.Context, d *db.DB, p *paths.Paths, workDir string) (*db.R
 
 	// Remove remote from working repo (non-fatal).
 	_ = git.RemoveRemote(ctx, absRoot, RemoteName)
+
+	// Local mode: the shim origin is derived state whose source of truth is
+	// the working repo itself, so remove it along with the origin remote
+	// pointing at it.
+	if IsLocalOrigin(p, repo.UpstreamURL) {
+		if originURL, err := git.GetRemoteURL(ctx, absRoot, "origin"); err == nil && originURL == repo.UpstreamURL {
+			_ = git.RemoveRemote(ctx, absRoot, "origin")
+		}
+		os.RemoveAll(LocalOriginDir(p, repo.ID))
+	}
 
 	// Delete bare repo.
 	bareDir := p.RepoDir(repo.ID)

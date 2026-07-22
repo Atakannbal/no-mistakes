@@ -32,6 +32,16 @@ var canonicalPreserveGateFixPhrases = []string{
 	"already-resolved findings do not re-surface",
 }
 
+// canonicalLocalMergePhrases are the load-bearing claims of the local-mode
+// terminal guidance: a completed local-mode run ends at "checks green, ready
+// for a local ff-merge" - there is no PR, so the agent hands the user the
+// local merge command and never claims a PR was opened or merged.
+var canonicalLocalMergePhrases = []string{
+	"merge locally",
+	"git merge --ff-only FETCH_HEAD",
+	"never claim a PR",
+}
+
 // TestStaleMonitorGuidance_SyncedAcrossSurfaces guards the repo invariant that
 // agent-driving guidance stays in sync across its three surfaces: the skill
 // body, the published agents guide, and the live axi help string. The earlier
@@ -77,7 +87,7 @@ func TestStaleMonitorGuidance_InChecksPassedOutput(t *testing.T) {
 	var out bytes.Buffer
 	cmd := &cobra.Command{}
 	cmd.SetOut(&out)
-	if err := renderDriveResult(cmd, run, true); err != nil {
+	if err := renderDriveResult(cmd, run, true, nil); err != nil {
 		t.Fatalf("checks-passed must exit 0, got error: %v", err)
 	}
 
@@ -128,6 +138,68 @@ func TestPreserveGateFixGuidance_InPointOfUseOutputs(t *testing.T) {
 	}
 }
 
+// TestLocalMergeGuidance_SyncedAcrossSurfaces keeps the local-mode terminal
+// wording in sync across the skill body and the agents guide, mirroring the
+// other canonical guidance invariants in this file.
+func TestLocalMergeGuidance_SyncedAcrossSurfaces(t *testing.T) {
+	surfaces := map[string]string{
+		"skill body":   skill.Markdown(),
+		"agents guide": readAgentsGuide(t),
+	}
+	for name, content := range surfaces {
+		for _, phrase := range canonicalLocalMergePhrases {
+			if !strings.Contains(content, phrase) {
+				t.Errorf("%s is missing the canonical local-merge guidance phrase %q", name, phrase)
+			}
+		}
+	}
+}
+
+// TestLocalMergeGuidance_InCompletedOutput ensures the guidance reaches the
+// agent at its point of use: the completed `axi run` output of a local-mode
+// run, where the agent decides what to tell the user. A remote-mode completed
+// run must not carry it.
+func TestLocalMergeGuidance_InCompletedOutput(t *testing.T) {
+	completedRun := func() *ipc.RunInfo {
+		return &ipc.RunInfo{
+			ID:      "run-1",
+			Branch:  "feature/x",
+			Status:  types.RunCompleted,
+			HeadSHA: "abcdef1234567890",
+			Steps: []ipc.StepResultInfo{
+				{StepName: types.StepPR, Status: types.StepStatusSkipped},
+				{StepName: types.StepCI, Status: types.StepStatusSkipped},
+			},
+		}
+	}
+
+	var out bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+	if err := renderDriveResult(cmd, completedRun(), false, &localModeInfo{defaultBranch: "main"}); err != nil {
+		t.Fatalf("completed local-mode run must exit 0, got error: %v", err)
+	}
+	got := out.String()
+	wants := append([]string{
+		"git fetch no-mistakes feature/x",
+		"(on main)",
+		"outcome: passed",
+	}, canonicalLocalMergePhrases...)
+	for _, want := range wants {
+		if !strings.Contains(got, want) {
+			t.Errorf("local-mode completed output missing %q in:\n%s", want, got)
+		}
+	}
+
+	out.Reset()
+	if err := renderDriveResult(cmd, completedRun(), false, nil); err != nil {
+		t.Fatalf("completed remote-mode run must exit 0, got error: %v", err)
+	}
+	if strings.Contains(out.String(), "merge locally") {
+		t.Errorf("remote-mode completed output must not carry the local-merge help line:\n%s", out.String())
+	}
+}
+
 func renderDriveResultForGuidanceTest(t *testing.T, ciReady bool, status types.RunStatus) string {
 	t.Helper()
 	run := &ipc.RunInfo{
@@ -144,7 +216,7 @@ func renderDriveResultForGuidanceTest(t *testing.T, ciReady bool, status types.R
 	var out bytes.Buffer
 	cmd := &cobra.Command{}
 	cmd.SetOut(&out)
-	err := renderDriveResult(cmd, run, ciReady)
+	err := renderDriveResult(cmd, run, ciReady, nil)
 	var exit *exitError
 	if err != nil && !errors.As(err, &exit) {
 		t.Fatalf("renderDriveResult returned unexpected error: %v", err)

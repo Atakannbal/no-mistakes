@@ -23,6 +23,9 @@ Without any provider setup, `no-mistakes` still gives you the local gate:
 
 What you do not get is PR automation and CI monitoring.
 
+A repository with no remote at all can run that same full gate too - see
+[Local Mode](/no-mistakes/guides/local-mode/).
+
 ## What each step needs
 
 | Step | GitHub | GitLab | Bitbucket Cloud | Azure DevOps |
