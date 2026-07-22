@@ -51,6 +51,8 @@ no-mistakes init --fork-url git@github.com:you/my-repo.git
 
 The gate will push validated branches to the fork while opening PRs against the parent.
 
+For a repository with no remote at all, use `no-mistakes init --local` instead - see [Local Mode](/no-mistakes/guides/local-mode/).
+
 ```
 $ no-mistakes init
   ✓ Gate initialized

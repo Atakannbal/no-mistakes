@@ -214,6 +214,7 @@ no-mistakes eject
 ```
 
 Removes the `no-mistakes` remote, deletes the bare repo directory, cleans up worktrees, and deletes the database record (cascades to runs and steps).
+In a [local-mode](/no-mistakes/guides/local-mode/) repo, it also removes the `origin` remote wiring and deletes the managed local origin.
 It does not remove any legacy repo-local agent skill files left by older versions; current `init` installs the skill at user level instead.
 
 ## no-mistakes attach
